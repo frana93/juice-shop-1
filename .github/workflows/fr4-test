@@ -1,0 +1,56 @@
+name: Security & Test Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build-and-security:
+    runs-on: ubuntu-latest
+    env:
+      MAVEN_OPTS: "-Dmaven.repo.local=${{ github.workspace }}/.m2"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 1️⃣ Build & Unit Test
+      - name: Build & Unit Tests
+        run: mvn -B clean verify
+        continue-on-error: false
+
+      # 2️⃣ PMD - Source Code Analysis
+      - name: Run PMD (SAST - Source Analysis)
+        run: mvn pmd:check
+        continue-on-error: false
+
+      # 3️⃣ SpotBugs + FindSecBugs - Bytecode Analysis
+      - name: Run SpotBugs + FindSecBugs (SAST - OWASP Top 10)
+        run: mvn com.github.spotbugs:spotbugs-maven-plugin:check
+        continue-on-error: false
+
+      # 4️⃣ OWASP Dependency-Check - SCA
+      - name: Run OWASP Dependency-Check (SCA - CVE Scan)
+        run: mvn org.owasp:dependency-check-maven:check -Dformat=ALL
+        continue-on-error: false
+
+      # 5️⃣ CycloneDX - SBOM Generation
+      - name: Generate SBOM (CycloneDX Format)
+        run: mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom
+        continue-on-error: false
+
+      # 6️⃣ Publish Reports
+      - name: Upload Security Reports Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: target/
+
+      # 7️⃣ (Optional) Fail Gate - Block if vulnerabilities found
+      - name: Security Gate - Fail on High Severity CVE
+        run: |
+          echo "Checking for high severity vulnerabilities..."
+          grep -i "HIGH" target/dependency-check-report.html && exit 1 || echo "No high vulnerabilities found."
+        continue-on-error: false
